@@ -1,0 +1,371 @@
+import tkinter as tk
+from tkinter import ttk
+import threading
+import time
+import random
+import math
+
+class AutoAimSystem:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Auto-Aim System - Kindo")
+        self.root.geometry("600x500")
+        self.root.configure(bg="#1a1a2e")
+        
+        # Variáveis de controle
+        self.is_active = False
+        self.target_locked = False
+        self.aim_speed = 0.15
+        self.fov = 120  # Campo de visão em graus
+        self.min_distance = 100
+        self.max_distance = 1500
+        self.fire_cooldown = 0.05
+        self.smooth_aim = True
+        self.fov_radius = 200
+        
+        # Posições simuladas
+        self.player_pos = (300, 250)
+        self.enemies = self._generate_enemies()
+        self.mouse_pos = (300, 250)
+        
+        self._create_ui()
+        self._start_update_loop()
+        
+    def _generate_enemies(self):
+        """Gera posições simuladas de inimigos"""
+        enemies = []
+        for i in range(8):
+            enemies.append({
+                'id': i,
+                'x': random.randint(50, 550),
+                'y': random.randint(50, 450),
+                'health': random.randint(50, 100),
+                'name': f"Enemy_{i}"
+            })
+        return enemies
+    
+    def _create_ui(self):
+        """Cria a interface gráfica"""
+        # Container principal
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configurar colunas
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        
+        # Título
+        title = tk.Label(main_frame, text="⚡ Auto-Aim System", 
+                        font=("Segoe UI", 18, "bold"), fg="#00d9ff", bg="#1a1a2e")
+        title.pack(pady=(10, 20))
+        
+        # Container de controles
+        controls_frame = ttk.LabelFrame(main_frame, text="Controles", padding="15")
+        controls_frame.pack(fill=tk.X, pady=10)
+        
+        # Toggle de ativação
+        self.active_var = tk.BooleanVar()
+        toggle_btn = tk.Checkbutton(controls_frame, text="🎯 Ativar Auto-Aim", 
+                                   variable=self.active_var, 
+                                   command=self._toggle_aim,
+                                   font=("Segoe UI", 12, "bold"),
+                                   fg="#00ff88", bg="#1a1a2e")
+        toggle_btn.pack(anchor=tk.W, pady=5)
+        
+        # Sliders de configuração
+        settings_frame = ttk.LabelFrame(main_frame, text="Configurações", padding="15")
+        settings_frame.pack(fill=tk.X, pady=10)
+        
+        # FOV
+        self.fov_var = tk.DoubleVar(value=self.fov)
+        ttk.Label(settings_frame, text="Campo de Visão (graus):").pack(anchor=tk.W)
+        fov_slider = ttk.Scale(settings_frame, from_=30, to=180, orient=tk.HORIZONTAL,
+                              variable=self.fov_var, command=self._update_fov)
+        fov_slider.pack(fill=tk.X, pady=5)
+        
+        # Velocidade da mira
+        self.speed_var = tk.DoubleVar(value=self.aim_speed)
+        ttk.Label(settings_frame, text="Velocidade da Mira:").pack(anchor=tk.W)
+        speed_slider = ttk.Scale(settings_frame, from_=0.05, to=0.5, orient=tk.HORIZONTAL,
+                                variable=self.speed_var, command=self._update_speed)
+        speed_slider.pack(fill=tk.X, pady=5)
+        
+        # Distância mínima
+        self.min_dist_var = tk.IntVar(value=self.min_distance)
+        ttk.Label(settings_frame, text="Distância Mínima:").pack(anchor=tk.W)
+        min_dist_slider = ttk.Scale(settings_frame, from_=50, to=500, orient=tk.HORIZONTAL,
+                                   variable=self.min_dist_var, command=self._update_min_dist)
+        min_dist_slider.pack(fill=tk.X, pady=5)
+        
+        # Distância máxima
+        self.max_dist_var = tk.IntVar(value=self.max_distance)
+        ttk.Label(settings_frame, text="Distância Máxima:").pack(anchor=tk.W)
+        max_dist_slider = ttk.Scale(settings_frame, from_=500, to=3000, orient=tk.HORIZONTAL,
+                                   variable=self.max_dist_var, command=self._update_max_dist)
+        max_dist_slider.pack(fill=tk.X, pady=5)
+        
+        # Cooldown
+        self.cooldown_var = tk.DoubleVar(value=self.fire_cooldown)
+        ttk.Label(settings_frame, text="Cooldown de Tiro (s):").pack(anchor=tk.W)
+        cooldown_slider = ttk.Scale(settings_frame, from_=0.01, to=0.5, orient=tk.HORIZONTAL,
+                                   variable=self.cooldown_var, command=self._update_cooldown)
+        cooldown_slider.pack(fill=tk.X, pady=5)
+        
+        # Checkbox de mira suave
+        self.smooth_var = tk.BooleanVar(value=self.smooth_aim)
+        smooth_check = tk.Checkbutton(settings_frame, text="Mira Suave", 
+                                     variable=self.smooth_var,
+                                     command=self._update_smooth)
+        smooth_check.pack(anchor=tk.W, pady=5)
+        
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="Status", padding="15")
+        status_frame.pack(fill=tk.X, pady=10)
+        
+        # Indicadores de status
+        self.status_active = tk.Label(status_frame, text="● Inativo", 
+                                     font=("Segoe UI", 12, "bold"), fg="#ff4444")
+        self.status_active.pack(anchor=tk.W, pady=2)
+        
+        self.status_target = tk.Label(status_frame, text="Alvo: Nenhum", 
+                                     font=("Segoe UI", 10), fg="#aaaaaa")
+        self.status_target.pack(anchor=tk.W, pady=2)
+        
+        self.status_fov = tk.Label(status_frame, text=f"FOV: {self.fov}° | Velocidade: {self.aim_speed:.2f}", 
+                                  font=("Segoe UI", 10), fg="#aaaaaa")
+        self.status_fov.pack(anchor=tk.W, pady=2)
+        
+        self.status_dist = tk.Label(status_frame, text=f"Distância: {self.min_distance}-{self.max_distance}m", 
+                                   font=("Segoe UI", 10), fg="#aaaaaa")
+        self.status_dist.pack(anchor=tk.W, pady=2)
+        
+        # Canvas para visualização
+        canvas_frame = ttk.LabelFrame(main_frame, text="Visualização", padding="5")
+        canvas_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.canvas = tk.Canvas(canvas_frame, width=580, height=280, 
+                               bg="#0d0d1a", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Botão de reiniciar
+        reset_btn = tk.Button(main_frame, text="🔄 Reiniciar Simulação", 
+                             command=self._reset_simulation,
+                             font=("Segoe UI", 10), bg="#16213e", fg="#00d9ff",
+                             relief=tk.FLAT, padx=15, pady=5)
+        reset_btn.pack(pady=10)
+        
+        # Barra de status inferior
+        self.status_bar = tk.Label(self.root, text="Sistema pronto | Pressione F5 para resetar", 
+                                  font=("Segoe UI", 9), fg="#888888", bg="#0f0f1a",
+                                  anchor=tk.W, padx=10)
+        self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        # Atalhos de teclado
+        self.root.bind('<F5>', lambda e: self._reset_simulation())
+        self.root.bind('<Escape>', lambda e: self._toggle_aim())
+        
+    def _toggle_aim(self):
+        """Ativa/desativa o auto-aim"""
+        self.is_active = not self.is_active
+        self.active_var.set(self.is_active)
+        
+        if self.is_active:
+            self.status_active.config(text="● ATIVO", fg="#00ff88")
+            self.status_bar.config(text=f"Auto-Aim ATIVO | FOV: {self.fov}° | Velocidade: {self.aim_speed:.2f}")
+        else:
+            self.status_active.config(text="● Inativo", fg="#ff4444")
+            self.status_bar.config(text="Auto-Aim INATIVO | Pressione F5 para resetar")
+    
+    def _update_fov(self, value):
+        self.fov = int(float(value))
+        self.status_fov.config(text=f"FOV: {self.fov}° | Velocidade: {self.aim_speed:.2f}")
+    
+    def _update_speed(self, value):
+        self.aim_speed = float(value)
+        self.status_fov.config(text=f"FOV: {self.fov}° | Velocidade: {self.aim_speed:.2f}")
+    
+    def _update_min_dist(self, value):
+        self.min_distance = int(float(value))
+        self.status_dist.config(text=f"Distância: {self.min_distance}-{self.max_distance}m")
+    
+    def _update_max_dist(self, value):
+        self.max_distance = int(float(value))
+        self.status_dist.config(text=f"Distância: {self.min_distance}-{self.max_distance}m")
+    
+    def _update_cooldown(self, value):
+        self.fire_cooldown = float(value)
+    
+    def _update_smooth(self):
+        self.smooth_aim = self.smooth_var.get()
+    
+    def _reset_simulation(self):
+        """Reinicia a simulação"""
+        self.enemies = self._generate_enemies()
+        self.player_pos = (300, 250)
+        self.mouse_pos = (300, 250)
+        self.target_locked = False
+        self.status_target.config(text="Alvo: Nenhum", fg="#aaaaaa")
+        self.status_bar.config(text="Simulação reiniciada")
+    
+    def _find_target(self):
+        """Encontra o alvo mais próximo dentro do FOV"""
+        if not self.is_active:
+            return None
+        
+        best_target = None
+        best_score = float('inf')
+        
+        for enemy in self.enemies:
+            dx = enemy['x'] - self.player_pos[0]
+            dy = enemy['y'] - self.player_pos[1]
+            distance = math.sqrt(dx**2 + dy**2)
+            
+            # Verifica distância
+            if distance < self.min_distance or distance > self.max_distance:
+                continue
+            
+            # Calcula ângulo relativo
+            angle_to_enemy = math.atan2(dy, dx)
+            
+            # Ângulo do jogador (para a direita)
+            player_angle = 0
+            
+            # Diferença angular normalizada
+            angle_diff = abs(angle_to_enemy - player_angle)
+            if angle_diff > math.pi:
+                angle_diff = 2 * math.pi - angle_diff
+            
+            # Converte para graus
+            angle_deg = math.degrees(angle_diff)
+            
+            # Verifica FOV
+            if angle_deg > self.fov / 2:
+                continue
+            
+            # Score: prioriza distância e FOV
+            score = distance / (1 + (self.fov / 2 - angle_deg) / 10)
+            
+            if score < best_score:
+                best_score = score
+                best_target = enemy
+        
+        return best_target
+    
+    def _update_aim(self):
+        """Atualiza a posição da mira"""
+        target = self._find_target()
+        
+        if target:
+            if not self.target_locked:
+                self.target_locked = True
+                self.status_target.config(text=f"Alvo: {target['name']} | HP: {target['health']}", 
+                                         fg="#00d9ff")
+            
+            # Movimento suave da mira
+            target_x = target['x']
+            target_y = target['y']
+            
+            if self.smooth_aim:
+                dx = target_x - self.mouse_pos[0]
+                dy = target_y - self.mouse_pos[1]
+                self.mouse_pos = (
+                    self.mouse_pos[0] + dx * self.aim_speed,
+                    self.mouse_pos[1] + dy * self.aim_speed
+                )
+            else:
+                self.mouse_pos = (target_x, target_y)
+            
+            # Dispara se estiver no cooldown
+            if not hasattr(self, '_last_shot') or time.time() - self._last_shot >= self.fire_cooldown:
+                self._fire(target)
+                self._last_shot = time.time()
+        else:
+            if self.target_locked:
+                self.target_locked = False
+                self.status_target.config(text="Alvo: Nenhum", fg="#aaaaaa")
+            # Retorna ao centro
+            dx = self.player_pos[0] - self.mouse_pos[0]
+            dy = self.player_pos[1] - self.mouse_pos[1]
+            self.mouse_pos = (
+                self.mouse_pos[0] + dx * 0.1,
+                self.mouse_pos[1] + dy * 0.1
+            )
+    
+    def _fire(self, target):
+        """Simula um tiro"""
+        # Em um jogo real, aqui você injetaria o comando de tiro
+        # Por exemplo: mouse.click(), keyboard.press('space'), etc.
+        pass
+    
+    def _update_enemies(self):
+        """Simula movimento dos inimigos"""
+        for enemy in self.enemies:
+            # Movimento aleatório suave
+            enemy['x'] += random.uniform(-2, 2)
+            enemy['y'] += random.uniform(-2, 2)
+            
+            # Mantém dentro dos limites
+            enemy['x'] = max(30, min(550, enemy['x']))
+            enemy['y'] = max(30, min(450, enemy['y']))
+            
+            # Dano simulado
+            if random.random() < 0.01:
+                enemy['health'] = max(0, enemy['health'] - random.randint(5, 15))
+    
+    def _draw_scene(self):
+        """Desenha a cena no canvas"""
+        self.canvas.delete("all")
+        
+        # Grade de fundo
+        for i in range(0, 580, 40):
+            self.canvas.create_line(i, 0, i, 280, fill="#1a1a2e", width=1)
+            self.canvas.create_line(0, i, 580, i, fill="#1a1a2e", width=1)
+        
+        # FOV do jogador
+        if self.is_active:
+            fov_rad = math.radians(self.fov / 2)
+            fov_points = []
+            for angle in range(-int(self.fov/2), int(self.fov/2) + 1, 5):
+                rad = math.radians(angle)
+                x = self.player_pos[0] + self.fov_radius * math.cos(rad)
+                y = self.player_pos[1] - self.fov_radius * math.sin(rad)
+                fov_points.extend([x, y])
+            
+            if fov_points:
+                self.canvas.create_polygon([self.player_pos[0], self.player_pos[1]] + fov_points,
+                                          fill="#00d9ff11", outline="#00d9ff", width=1)
+        
+        # Jogador
+        self.canvas.create_oval(self.player_pos[0]-10, self.player_pos[1]-10,
+                               self.player_pos[0]+10, self.player_pos[1]+10,
+                               fill="#00ff88", outline="#00cc66", width=2)
+        self.canvas.create_text(self.player_pos[0], self.player_pos[1]-15, 
+                               text="Você", fill="#00ff88", font=("Segoe UI", 8))
+        
+        # Inimigos
+        for enemy in self.enemies:
+            is_target = (self.is_active and self.target_locked and 
+                        enemy['x'] == self.mouse_pos[0] and enemy['y'] == self.mouse_pos[1])
+            
+            color = "#ff4444" if is_target else "#ff8888"
+            outline = "#ff0000" if is_target else "#cc6666"
+            
+            self.canvas.create_oval(enemy['x']-8, enemy['y']-8,
+                                   enemy['x']+8, enemy['y']+8,
+                                   fill=color, outline=outline, width=2)
+            
+            # Barra de vida
+            bar_width = 20
+            bar_height = 3
+            self.canvas.create_rectangle(enemy['x']-bar_width/2, enemy['y']-15,
+                                        enemy['x']+bar_width/2, enemy['y']-15+bar_height,
+                                        fill="#333333", outline="")
+            health_width = bar_width * (enemy['health'] / 100)
+            self.canvas.create_rectangle(enemy['x']-bar_width/2, enemy['y']-15,
+                                        enemy['x']-bar_width/2+health_width, enemy['y']-15+bar_height,
+                                        fill="#00ff88", outline="")
+        
+        # Mira
+        crosshair_size = 15
+        mx, my = self.mouse_pos
+       
