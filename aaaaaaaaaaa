@@ -1,0 +1,218 @@
+--[[
+    Kindo Auto-Fire v3.0 - Ultra Robust
+    Sem HUD complexo para evitar erros de CoreGui.
+    Foco total em compatibilidade e performance.
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- ==========================================
+-- CONFIGURAÇÕES
+-- ==========================================
+local CONFIG = {
+    Enabled = true,
+    FOV = 25,             -- Ângulo em graus. 25 é um bom equilíbrio.
+    MinDistance = 3,      -- Estuda.
+    MaxDistance = 400,    -- Estuda.
+    FireRate = 0.05,      -- Segundos entre tiros. 0.05 = 20 tiros/s.
+    CheckObstacles = true -- Desative se quiser atirar através de paredes.
+}
+
+-- ==========================================
+-- ESTADO
+-- ==========================================
+local State = {
+    LastFireTime = 0,
+    IsFiring = false,
+    CurrentTarget = nil
+}
+
+-- ==========================================
+-- FUNÇÕES AUXILIARES
+-- ==========================================
+
+-- Obtém a posição central do personagem de forma segura
+local function GetCharPos(char)
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        return hrp.Position
+    end
+    -- Fallback para GetPivot se HRP não existir
+    pcall(function()
+        return char:GetPivot().Position
+    end)
+    return nil
+end
+
+-- Verifica se o alvo está na mira
+local function IsInCrosshair(character)
+    if not character or not character:FindFirstChild("Humanoid") then
+        return false
+    end
+
+    local humanoid = character:FindFirstChild("Humanoid")
+    if humanoid.Health <= 0 then
+        return false
+    end
+
+    local targetPos = GetCharPos(character)
+    if not targetPos then return false end
+
+    local camPos = camera.CFrame.Position
+    local camForward = camera.CFrame.LookVector
+
+    -- 1. Distância
+    local distance = (targetPos - camPos).Magnitude
+    if distance < CONFIG.MinDistance or distance > CONFIG.MaxDistance then
+        return false
+    end
+
+    -- 2. Ângulo (FOV)
+    local dirToTarget = (targetPos - camPos).Unit
+    local dot = math.clamp(dirToTarget:Dot(camForward), -1, 1)
+    local angleRad = math.acos(dot)
+    local angleDeg = math.deg(angleRad)
+
+    if angleDeg > CONFIG.FOV / 2 then
+        return false
+    end
+
+    -- 3. Obstrução
+    if CONFIG.CheckObstacles then
+        local rayParams = RaycastParams.new()
+        rayParams.FilterDescendantsInstances = {player.Character, character}
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        
+        local result = workspace:Raycast(camPos, camForward * distance, rayParams)
+        
+        if result then
+            local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
+            if hitModel and hitModel ~= character then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+-- Encontra o alvo mais próximo na mira
+local function FindTarget()
+    local bestTarget = nil
+    local bestDist = math.huge
+
+    for _, other in ipairs(Players:GetPlayers()) do
+        if other ~= player and other.Character then
+            if IsInCrosshair(other.Character) then
+                local pos = GetCharPos(other.Character)
+                local dist = (pos - camera.CFrame.Position).Magnitude
+                if dist < bestDist then
+                    bestDist = dist
+                    bestTarget = other.Character
+                end
+            end
+        end
+    end
+    return bestTarget
+end
+
+-- ==========================================
+-- SIMULAÇÃO DE DISPARO
+-- ==========================================
+local function Fire()
+    -- Método 1: Virtual Input (Se o executor suportar)
+    if game:GetService("VirtualInput") then
+        pcall(function()
+            game:GetService("VirtualInput"):PressButton(Enum.UserInputType.MouseButton1, camera.CFrame.Position)
+            game:GetService("VirtualInput"):ReleaseButton(Enum.UserInputType.MouseButton1, camera.CFrame.Position)
+        end)
+    end
+    
+    -- Método 2: UserInputService (Fallback)
+    -- Alguns executors permitem capturar o controle
+    pcall(function()
+        UserInputService:CaptureController()
+    end)
+    
+    -- Nota: Em muitos jogos, se você estiver segurando o mouse, 
+    -- o jogo já dispara. Este script garante que o "gatilho" seja 
+    -- acionado programaticamente mesmo se você soltar o mouse.
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL
+-- ==========================================
+local function Update()
+    if not CONFIG.Enabled then return end
+
+    local now = os.clock()
+    if now - State.LastFireTime < CONFIG.FireRate then
+        return
+    end
+
+    local target = FindTarget()
+
+    if target then
+        Fire()
+        State.LastFireTime = now
+        State.IsFiring = true
+        State.CurrentTarget = target
+    else
+        State.IsFiring = false
+        State.CurrentTarget = nil
+    end
+end
+
+RunService:BindToRenderStep("KindoAutoFire", Enum.RenderPriority.Camera.Value + 1, Update)
+
+-- ==========================================
+-- HUD SIMPLES (Mínimo Risco)
+-- ==========================================
+local function CreateMinimalHUD()
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return end
+
+    -- Remove HUD antigo
+    local old = playerGui:FindFirstChild("KindoMinimalHUD")
+    if old then old:Destroy() end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "KindoMinimalHUD"
+    sg.ResetOnSpawn = false
+    sg.DisplayOrder = 999
+    sg.Parent = playerGui
+
+    local label = Instance.new("TextLabel")
+    label.Name = "Status"
+    label.Size = UDim2.new(0, 120, 0, 30)
+    label.Position = UDim2.new(1, -130, 0, 50)
+    label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    label.BackgroundTransparency = 0.3
+    label.Text = "AutoFire: ON"
+    label.TextColor3 = Color3.fromRGB(0, 255, 0)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 14
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.Parent = sg
+
+    -- Atualização simples
+    RunService:Heartbeat:Connect(function()
+        if State.IsFiring then
+            label.Text = "Target: " .. (State.CurrentTarget and State.CurrentTarget.Name or "Unknown")
+            label.TextColor3 = Color3.fromRGB(255, 100, 0)
+        else
+            label.Text = "AutoFire: ON"
+            label.TextColor3 = Color3.fromRGB(0, 255, 0)
+        end
+    end)
+end
+
+pcall(CreateMinimalHUD)
+print("[Kindo] Auto-Fire v3.0 carregado.")
