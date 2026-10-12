@@ -1,0 +1,241 @@
+--[[
+    Kindo Auto-Fire - Trigger Bot
+    Parte 1: Configuração e Lógica de Detecção
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- ==========================================
+-- CONFIGURAÇÕES
+-- ==========================================
+local CONFIG = {
+    Enabled = true,
+    FOV = 20,             -- Ângulo máximo (graus) para considerar "na mira"
+    MinDistance = 5,      -- Distância mínima (studs)
+    MaxDistance = 300,    -- Distância máxima (studs)
+    FireRate = 0.08,      -- Intervalo entre disparos (segundos). 0.08 = ~12.5 tiros/s
+    CheckObstacles = true -- Se true, não atira se houver parede entre você e o alvo
+}
+
+-- ==========================================
+-- ESTADO
+-- ==========================================
+local State = {
+    LastFireTime = 0,
+    IsFiring = false,
+    CurrentTarget = nil
+}
+
+-- ==========================================
+-- FUNÇÕES DE DETECÇÃO
+-- ==========================================
+
+-- Verifica se um objeto está na direção da câmera
+local function IsInCrosshair(character)
+    if not character or not character:FindFirstChild("Humanoid") then
+        return false
+    end
+
+    local humanoid = character:FindFirstChild("Humanoid")
+    if humanoid.Health <= 0 then
+        return false
+    end
+
+    local charPos = character:GetPivot().Position
+    local camPos = camera.CFrame.Position
+    local camForward = camera.CFrame.LookVector
+
+    -- 1. Verificação de Distância
+    local distance = (charPos - camPos).Magnitude
+    if distance < CONFIG.MinDistance or distance > CONFIG.MaxDistance then
+        return false
+    end
+
+    -- 2. Verificação de Ângulo (FOV)
+    local dirToTarget = (charPos - camPos).Unit
+    local dot = math.clamp(dirToTarget:Dot(camForward), -1, 1)
+    local angleRad = math.acos(dot)
+    local angleDeg = math.deg(angleRad)
+
+    if angleDeg > CONFIG.FOV / 2 then
+        return false
+    end
+
+    -- 3. Verificação de Obstrução (Opcional)
+    if CONFIG.CheckObstacles then
+        local rayParams = RaycastParams.new()
+        rayParams.FilterDescendantsInstances = {player.Character, character}
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        
+        local raycastResult = workspace:Raycast(camPos, camForward * distance, rayParams)
+        
+        if raycastResult then
+            -- Se o hit for em outro objeto que não é o alvo, está obstruído
+            local hitModel = raycastResult.Instance:FindFirstAncestorOfClass("Model")
+            if hitModel and hitModel ~= character then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+-- Função auxiliar para encontrar o melhor alvo na mira
+local function FindTargetInCrosshair()
+    local bestTarget = nil
+    local bestDistance = math.huge
+
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            if IsInCrosshair(otherPlayer.Character) then
+                local charPos = otherPlayer.Character:GetPivot().Position
+                local distance = (charPos - camera.CFrame.Position).Magnitude
+                
+                -- Prioriza o mais próximo
+                if distance < bestDistance then
+                    bestDistance = distance
+                    bestTarget = otherPlayer.Character
+                end
+            end
+        end
+    end
+    return bestTarget
+end
+
+-- ==========================================
+-- LÓGICA DE DISPARO
+-- ==========================================
+
+local function FireWeapon()
+    -- Simula o clique do mouse esquerdo
+    -- Em jogos Roblox, isso dispara a arma se o sistema de input estiver ativo
+    UserInputService:CaptureController()
+    
+    -- Em alguns executors, você pode usar:
+    -- virtualInput:Click(Enum.UserInputType.MouseButton1)
+    -- Mas para máxima compatibilidade, usamos o estado do mouse.
+    
+    -- Força o estado do mouse para "pressionado" por um frame
+    -- Isso faz o jogo registrar o tiro.
+    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL
+-- ==========================================
+
+local function Update()
+    if not CONFIG.Enabled then
+        return
+    end
+
+    local now = os.clock()
+    
+    -- Verifica se está na hora de atirar
+    if now - State.LastFireTime < CONFIG.FireRate then
+        return
+    end
+
+    -- Procura por inimigos na mira
+    local targetOnCrosshair = FindTargetInCrosshair()
+
+    if targetOnCrosshair then
+        -- Dispara
+        FireWeapon()
+        State.LastFireTime = now
+        State.IsFiring = true
+        State.CurrentTarget = targetOnCrosshair
+    else
+        State.IsFiring = false
+        State.CurrentTarget = nil
+    end
+end
+
+RunService:BindToRenderStep("KindoAutoFire", Enum.RenderPriority.Camera.Value + 1, Update)
+
+-- ==========================================
+-- HUD DE STATUS
+-- ==========================================
+local function CreateHUD()
+    local playerGui = player:FindFirstChild("PlayerGui")
+    if not playerGui then return end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "KindoAutoFireHUD"
+    screenGui.ResetOnSpawn = false
+    screenGui.DisplayOrder = 100
+    screenGui.Parent = playerGui
+
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.Size = UDim2.new(0, 150, 0, 60)
+    frame.Position = UDim2.new(1, -160, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(26, 26, 46)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 20)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "🔥 Auto-Fire"
+    title.TextColor3 = Color3.fromRGB(255, 100, 0)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 12
+    title.Parent = frame
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "Status"
+    statusLabel.Size = UDim2.new(1, -10, 0, 15)
+    statusLabel.Position = UDim2.new(0, 5, 0, 25)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Pronta"
+    statusLabel.TextColor3 = Color3.fromRGB(0, 255, 136)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 10
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = frame
+
+    local targetLabel = Instance.new("TextLabel")
+    targetLabel.Name = "Target"
+    targetLabel.Size = UDim2.new(1, -10, 0, 15)
+    targetLabel.Position = UDim2.new(0, 5, 0, 40)
+    targetLabel.BackgroundTransparency = 1
+    targetLabel.Text = "Alvo: Nenhum"
+    targetLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+    targetLabel.Font = Enum.Font.Gotham
+    targetLabel.TextSize = 10
+    targetLabel.TextXAlignment = Enum.TextXAlignment.Left
+    targetLabel.Parent = frame
+
+    -- Atualização do HUD
+    RunService:Heartbeat:Connect(function()
+        if State.IsFiring then
+            statusLabel.Text = "Status: ATIRANDO"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 0)
+            if State.CurrentTarget then
+                targetLabel.Text = "Alvo: " .. State.CurrentTarget.Name
+            end
+        else
+            statusLabel.Text = "Status: Pronta"
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 136)
+            targetLabel.Text = "Alvo: Nenhum"
+        end
+    end)
+end
+
+-- Cria o HUD com proteção
+pcall(CreateHUD)
+
+print("✅ Kindo Auto-Fire carregado! FOV: " .. CONFIG.FOV .. "° | Taxa: " .. CONFIG.FireRate .. "s")
