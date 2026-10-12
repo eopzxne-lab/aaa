@@ -1,0 +1,234 @@
+--[[
+    Auto-Aim System - Kindo
+    Compatível com Roblox (Luau)
+    Uso: Cole em um LocalScript ou em um executor
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+-- ==========================================
+-- CONFIGURAÇÕES (Ajuste aqui)
+-- ==========================================
+local CONFIG = {
+    Enabled = true,
+    FOV = 120,              -- Campo de visão em graus
+    MinDistance = 10,       -- Distância mínima em studs
+    MaxDistance = 200,      -- Distância máxima em studs
+    AimSpeed = 0.15,        -- Suavização (0.01 a 1.0)
+    FireCooldown = 0.05,    -- Cooldown entre tiros (segundos)
+    SmoothAim = true,       -- Usa lerp para suavizar a mira
+    PrioritizeHealth = false, -- Se true, prioriza inimigos com menos HP
+    PrioritizeDistance = true  -- Se true, prioriza inimigos mais próximos
+}
+
+-- ==========================================
+-- ESTADO
+-- ==========================================
+local State = {
+    Target = nil,
+    LastShotTime = 0,
+    IsAiming = false
+}
+
+-- ==========================================
+-- FUNÇÕES AUXILIARES
+-- ==========================================
+
+-- Converte CFrame para posição 3D local
+local function GetWorldPosition(model)
+    if model and model:FindFirstChild("Humanoid") then
+        return model:GetPivot().Position
+    end
+    return nil
+end
+
+-- Calcula a distância angular entre dois vetores
+local function GetAngleBetween(v1, v2)
+    local dot = math.clamp(v1:Dot(v2), -1, 1)
+    return math.acos(dot)
+end
+
+-- Encontra o melhor alvo dentro do FOV
+local function FindBestTarget()
+    if not CONFIG.Enabled then
+        return nil
+    end
+
+    local playerPos = camera.CFrame.Position
+    local cameraForward = camera.CFrame.LookVector
+    local bestTarget = nil
+    local bestScore = math.huge
+
+    for _, character in ipairs(Players:GetCharacters()) do
+        if character ~= player.Character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local targetPos = character:GetPivot().Position
+                local distance = (playerPos - targetPos).Magnitude
+
+                -- Verifica distância
+                if distance < CONFIG.MinDistance or distance > CONFIG.MaxDistance then
+                    continue
+                end
+
+                -- Calcula ângulo em relação à câmera
+                local dirToTarget = (targetPos - playerPos).Unit
+                local angleRad = GetAngleBetween(dirToTarget, cameraForward)
+                local angleDeg = math.deg(angleRad)
+
+                -- Verifica FOV
+                if angleDeg > CONFIG.FOV / 2 then
+                    continue
+                end
+
+                -- Calcula score
+                local score = distance
+                if CONFIG.PrioritizeHealth then
+                    score = score / (humanoid.Health + 1)
+                end
+
+                if score < bestScore then
+                    bestScore = score
+                    bestTarget = character
+                end
+            end
+        end
+    end
+
+    return bestTarget
+end
+
+-- Atualiza a mira
+local function UpdateAim()
+    local target = FindBestTarget()
+    State.Target = target
+
+    if target then
+        local targetPos = target:GetPivot().Position
+        local currentLook = camera.CFrame.LookVector
+        local targetLook = (targetPos - camera.CFrame.Position).Unit
+
+        if CONFIG.SmoothAim then
+            local newLook = currentLook:Lerp(targetLook, CONFIG.AimSpeed)
+            camera.CFrame = camera.CFrame:LookAt(targetPos, Vector3.new(0, 1, 0))
+        else
+            camera.CFrame = camera.CFrame:LookAt(targetPos, Vector3.new(0, 1, 0))
+        end
+
+        -- Disparo automático
+        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local now = os.clock()
+            if now - State.LastShotTime >= CONFIG.FireCooldown then
+                -- Simula o disparo (o Roblox já dispara se você estiver segurando o mouse)
+                State.LastShotTime = now
+            end
+        end
+    else
+        -- Não há alvo, não faz nada (a câmera fica livre)
+        State.IsAiming = false
+    end
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL
+-- ==========================================
+RunService:BindToRenderStep("AutoAimSystem", Enum.RenderPriority.Camera.Value + 1, function()
+    UpdateAim()
+end)
+
+-- ==========================================
+-- HUD BÁSICO (Opcional)
+-- ==========================================
+local function CreateHUD()
+    local playerGui = player:WaitForChild("PlayerGui")
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AutoAimHUD"
+    screenGui.ResetOnSpawn = false
+    screenGui.DisplayOrder = 100
+    screenGui.Parent = playerGui
+
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.Size = UDim2.new(0, 200, 0, 100)
+    frame.Position = UDim2.new(1, -210, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(26, 26, 46)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "⚡ Auto-Aim System"
+    title.TextColor3 = Color3.fromRGB(0, 217, 255)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.Parent = frame
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "Status"
+    statusLabel.Size = UDim2.new(1, -10, 0, 20)
+    statusLabel.Position = UDim2.new(0, 5, 0, 35)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: ATIVO"
+    statusLabel.TextColor3 = Color3.fromRGB(0, 255, 136)
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextSize = 12
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = frame
+
+    local targetLabel = Instance.new("TextLabel")
+    targetLabel.Name = "Target"
+    targetLabel.Size = UDim2.new(1, -10, 0, 20)
+    targetLabel.Position = UDim2.new(0, 5, 0, 55)
+    targetLabel.BackgroundTransparency = 1
+    targetLabel.Text = "Alvo: Nenhum"
+    targetLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+    targetLabel.Font = Enum.Font.Gotham
+    targetLabel.TextSize = 12
+    targetLabel.TextXAlignment = Enum.TextXAlignment.Left
+    targetLabel.Parent = frame
+
+    local fovLabel = Instance.new("TextLabel")
+    fovLabel.Name = "FOV"
+    fovLabel.Size = UDim2.new(1, -10, 0, 20)
+    fovLabel.Position = UDim2.new(0, 5, 0, 75)
+    fovLabel.BackgroundTransparency = 1
+    fovLabel.Text = string.format("FOV: %d° | Vel: %.2f", CONFIG.FOV, CONFIG.AimSpeed)
+    fovLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+    fovLabel.Font = Enum.Font.Gotham
+    fovLabel.TextSize = 12
+    fovLabel.TextXAlignment = Enum.TextXAlignment.Left
+    fovLabel.Parent = frame
+
+    -- Atualiza o HUD
+    RunService:Heartbeat:Connect(function()
+        if State.Target then
+            local humanoid = State.Target:FindFirstChild("Humanoid")
+            statusLabel.Text = "Status: ATIVO"
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 136)
+            targetLabel.Text = string.format("Alvo: %s | HP: %d", State.Target.Name, math.floor(humanoid and humanoid.Health or 0))
+        else
+            statusLabel.Text = "Status: SEM ALVO"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 68, 68)
+            targetLabel.Text = "Alvo: Nenhum"
+        end
+    end)
+
+    return screenGui
+end
+
+-- Cria o HUD
+local hud = CreateHUD()
+
+print("✅ Auto-Aim System carregado! FOV: " .. CONFIG.FOV .. "°")
