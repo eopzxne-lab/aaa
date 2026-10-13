@@ -1,0 +1,250 @@
+-- ==========================================
+-- SCRIPT FINAL & DEFINITIVO: TRIGGERBOT + X-RAY V8.1 (RAJADA COM OVERRUN)
+-- ==========================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+local CONFIG = {
+    FIRE_DELAY = 0.08,      -- Velocidade da rajada (cadência entre tiros)
+    EXTRA_SHOTS = 3,        -- Quantidade de tiros extras após a mira sair do alvo (para disfarçar)
+    XRAY_COLOR = Color3.fromRGB(255, 40, 40),
+    XRAY_TRANSPARENCY = 0.5,
+    MAX_DISTANCE = 300,
+}
+
+local state = {
+    afActive = false,
+    xrayActive = false,
+    lastFireTime = 0,
+    isFiring = false,
+    stopFiringAt = 0,      -- Armazena até quando o script deve continuar atirando
+}
+
+-- ==========================================
+-- INTERFACE MODERNA (GUI)
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ModernCheatGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.fromOffset(160, 110)
+mainFrame.Position = UDim2.new(0, 15, 0, 15)
+mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+mainFrame.BackgroundTransparency = 0.05
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = mainFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(45, 45, 55)
+stroke.Thickness = 1.5
+stroke.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundTransparency = 1
+title.Text = "⚡ AF & X-RAY"
+title.TextColor3 = Color3.fromRGB(240, 240, 250)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 13
+title.Parent = mainFrame
+
+local function createButton(name, positionY)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -20, 0, 30)
+    btn.Position = UDim2.new(0, 10, 0, positionY)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    btn.TextColor3 = Color3.fromRGB(200, 200, 210)
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 11
+    btn.Text = name
+    btn.Parent = mainFrame
+    
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 6)
+    c.Parent = btn
+    
+    return btn
+end
+
+local btnAF = createButton("🔫 AF: OFF", 35)
+local btnXRay = createButton("👁 X-RAY: OFF", 72)
+
+-- ==========================================
+-- X-RAY ENGINE
+-- ==========================================
+local function clearXRay()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            for _, part in ipairs(player.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part:GetAttribute("XRayApplied") then
+                    part.Color = part:GetAttribute("OriginalColor") or Color3.new(1,1,1)
+                    part.Transparency = part:GetAttribute("OriginalTransparency") or 0
+                    part:SetAttribute("XRayApplied", false)
+                end
+            end
+        end
+    end
+end
+
+local function updateXRay()
+    if not state.xrayActive then return end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            for _, part in ipairs(player.Character:GetDescendants()) do
+                if part:IsA("BasePart") and not part:GetAttribute("XRayApplied") then
+                    if not part:GetAttribute("OriginalColor") then
+                        part:SetAttribute("OriginalColor", part.Color)
+                        part:SetAttribute("OriginalTransparency", part.Transparency)
+                    end
+                    part.Color = CONFIG.XRAY_COLOR
+                    part.Transparency = CONFIG.XRAY_TRANSPARENCY
+                    part:SetAttribute("XRayApplied", true)
+                end
+            end
+        end
+    end
+end
+
+-- ==========================================
+-- BOTÕES DE EVENTOS
+-- ==========================================
+btnAF.MouseButton1Click:Connect(function()
+    state.afActive = not state.afActive
+    if state.afActive then
+        btnAF.Text = "🔫 AF: ON"
+        btnAF.BackgroundColor3 = Color3.fromRGB(34, 197, 94)
+        btnAF.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        btnAF.Text = "🔫 AF: OFF"
+        btnAF.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        btnAF.TextColor3 = Color3.fromRGB(200, 200, 210)
+        state.isFiring = false
+        pcall(function()
+            VirtualUser:Button1Up(Vector2.new(0,0))
+        end)
+    end
+end)
+
+btnXRay.MouseButton1Click:Connect(function()
+    state.xrayActive = not state.xrayActive
+    if state.xrayActive then
+        btnXRay.Text = "👁 X-RAY: ON"
+        btnXRay.BackgroundColor3 = Color3.fromRGB(59, 130, 246)
+        btnXRay.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        btnXRay.Text = "👁 X-RAY: OFF"
+        btnXRay.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        btnXRay.TextColor3 = Color3.fromRGB(200, 200, 210)
+        clearXRay()
+    end
+end)
+
+-- ==========================================
+-- DETECÇÃO DE ALVO VIA MOUSE.TARGET
+-- ==========================================
+local function getValidTarget()
+    local targetPart = Mouse.Target
+    if not targetPart then return nil end
+    
+    local model = targetPart.FindFirstAncestorOfClass(targetPart, "Model")
+    if not model then return nil end
+    
+    local targetPlayer = Players:GetPlayerFromCharacter(model)
+    if targetPlayer and targetPlayer ~= LocalPlayer then
+        local humanoid = model:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") and model:FindFirstChild("HumanoidRootPart") then
+                local dist = (char.HumanoidRootPart.Position - model.HumanoidRootPart.Position).Magnitude
+                if dist <= CONFIG.MAX_DISTANCE then
+                    return model
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL DE CONTROLE (HEARTBEAT - RAJADA COM DISFARCE)
+-- ==========================================
+RunService.Heartbeat:Connect(function()
+    updateXRay()
+    
+    if not state.afActive then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then 
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function() VirtualUser:Button1Up(Vector2.new(0,0)) end)
+        end
+        return 
+    end
+    
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function() VirtualUser:Button1Up(Vector2.new(0,0)) end)
+        end
+        return
+    end
+    
+    local target = getValidTarget()
+    local now = tick()
+    
+    -- Se houver alvo na mira, renova o tempo limite de disparo extra
+    if target then
+        state.stopFiringAt = now + (CONFIG.FIRE_DELAY * CONFIG.EXTRA_SHOTS)
+    end
+    
+    -- Mantém a rajada ativa se houver alvo OU se ainda estiver no tempo limite dos disparos extras
+    local shouldFire = target ~= nil or (state.isFiring and now < state.stopFiringAt)
+    
+    if shouldFire then
+        if not state.isFiring then
+            state.isFiring = true
+            state.lastFireTime = now
+            pcall(function()
+                VirtualUser:Button1Down(Vector2.new(0,0))
+            end)
+        else
+            if (now - state.lastFireTime >= CONFIG.FIRE_DELAY) then
+                state.lastFireTime = now
+                pcall(function()
+                    VirtualUser:Button1Up(Vector2.new(0,0))
+                    task.defer(function()
+                        if state.afActive and state.isFiring then
+                            VirtualUser:Button1Down(Vector2.new(0,0))
+                        end
+                    end)
+                end)
+            end
+        end
+    else
+        -- Tempo limite expirado e sem alvo: para o disparo
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function()
+                VirtualUser:Button1Up(Vector2.new(0,0))
+            end)
+        end
+    end
+end)
+
+print("[AF + X-Ray] Versão V8.1 (Rajada Legiti/Disfarçada) Carregada com Sucesso!")
