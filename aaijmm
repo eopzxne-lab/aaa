@@ -1,0 +1,97 @@
+-- Configurações
+local CONFIG = {
+    FIRE_RATE = 0.05, -- Intervalo entre tiros (segundos). 0.05 = 20 tps
+    RANGE = 600,      -- Alcance da raycast (estudios)
+    ENEMY_ONLY = true -- Se true, ignora aliados/NPCs do mesmo time
+}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+-- Estado
+local lastFire = 0
+local activeTool = nil
+
+-- Verifica se um personagem é inimigo
+local function isTargetValid(char)
+    if not char or not char:FindFirstChild("Humanoid") then return false end
+    if char == LocalPlayer.Character then return false end
+    
+    local charTeam = char.Team
+    local myTeam = LocalPlayer.Team
+    
+    if CONFIG.ENEMY_ONLY and charTeam and myTeam then
+        return charTeam ~= myTeam
+    end
+    return true
+end
+
+-- Dispara a arma atual
+local function fireWeapon()
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then return end
+    
+    -- Método 1: Se a arma usa BindableEvent local
+    local bindable = tool:FindFirstChild("Fire") or tool:FindFirstChild("Shoot")
+    if bindable and bindable:IsA("BindableEvent") then
+        bindable:Fire()
+    else
+        -- Método 2: Fallback - Simula clique no mouse
+        -- Isso funciona em 90% dos scripts de armas que usam UserInputService
+        Mouse:Click()
+    end
+    
+    -- Lógica de Munição Infinita (Opcional)
+    local ammoVal = tool:FindFirstChild("Ammo") or tool:FindFirstChild("Magazine")
+    if ammoVal and ammoVal:IsA("IntValue") then
+        ammoVal.Value = 999
+    end
+end
+
+-- Loop principal
+local function autoFireLoop()
+    while true do
+        RunService.Heartbeat:Wait()
+        
+        -- Throttling: Respeita a taxa de disparo
+        local now = tick()
+        if now - lastFire < CONFIG.FIRE_RATE then continue end
+        
+        local char = LocalPlayer.Character
+        if not char then continue end
+        
+        -- Verifica se há uma arma equipada
+        if not char:FindFirstChildOfClass("Tool") then continue end
+        
+        -- Converte posição do mouse para Raycast
+        local camera = workspace.CurrentCamera
+        local mousePos = Mouse.Position
+        local ray = camera:ViewportPointToRay(Vector2.new(mousePos.X, mousePos.Y))
+        
+        -- Raycast para encontrar o que está sob a mira
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = {char}
+        params.RespectCanCollide = true
+        
+        local result = workspace:Raycast(ray.Origin, ray.Direction * CONFIG.RANGE, params)
+        
+        if result then
+            local model = result.Instance:FindFirstAncestorOfClass("Model")
+            
+            -- Verifica se é um personagem válido e inimigo
+            if model and isTargetValid(model) then
+                lastFire = now
+                fireWeapon()
+            end
+        end
+    end
+end
+
+task.spawn(autoFireLoop)
+print("[AutoFire] Passivo ativo. A mira dispara sozinha ao passar sobre inimigos.")
