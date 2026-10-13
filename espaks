@@ -1,0 +1,260 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+
+-- ==========================================
+-- CONFIGURAÇÕES
+-- ==========================================
+local CONFIG = {
+    FIRE_INTERVAL = 0.06,      -- Velocidade de disparo (segundos). 0.06 = ~16 tps.
+    USE_CROSSHAIR_CENTER = true, -- Mira no centro da tela (FPS) vs Cursor do Mouse.
+    XRAY_COLOR = Color3.fromRGB(255, 0, 0), -- Cor do X-Ray
+    XRAY_TRANSPARENCY = 0.7,   -- Transparência do X-Ray (0.0 sólido, 1.0 invisível)
+    XRAY_ENABLED = true,       -- Inicia com X-Ray ativo
+}
+
+-- ==========================================
+-- GUI CRIAÇÃO
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AF_ProGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.fromOffset(140, 80)
+mainFrame.Position = UDim2.new(0, 10, 0, 10)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+mainFrame.BackgroundTransparency = 0.2
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.fromScale(1, 0.3)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "⚡ AF PRO"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = mainFrame
+
+local toggleAF = Instance.new("TextButton")
+toggleAF.Name = "ToggleAF"
+toggleAF.Size = UDim2.fromScale(1, 0.35)
+toggleAF.Position = UDim2.new(0, 0, 0.35, 0)
+toggleAF.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+toggleAF.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleAF.Font = Enum.Font.GothamMedium
+toggleAF.TextSize = 12
+toggleAF.Text = "🔫 TRIGGER: OFF"
+toggleAF.Parent = mainFrame
+
+local toggleXRay = Instance.new("TextButton")
+toggleXRay.Name = "ToggleXRay"
+toggleXRay.Size = UDim2.fromScale(1, 0.35)
+toggleXRay.Position = UDim2.new(0, 0, 0.72, 0)
+toggleXRay.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+toggleXRay.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleXRay.Font = Enum.Font.GothamMedium
+toggleXRay.TextSize = 12
+toggleXRay.Text = "👁 X-RAY: OFF"
+toggleXRay.Parent = mainFrame
+
+-- Ajustes de cantos nos botões
+for _, btn in {toggleAF, toggleXRay} do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 4)
+    c.Parent = btn
+end
+
+-- ==========================================
+-- ESTADO
+-- ==========================================
+local state = {
+    afActive = false,
+    xrayActive = false,
+    lastFireTime = 0,
+}
+
+-- ==========================================
+-- LÓGICA DE GUI
+-- ==========================================
+toggleAF.MouseButton1Click:Connect(function()
+    state.afActive = not state.afActive
+    if state.afActive then
+        toggleAF.Text = "🔫 TRIGGER: ON"
+        toggleAF.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    else
+        toggleAF.Text = "🔫 TRIGGER: OFF"
+        toggleAF.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    end
+end)
+
+toggleXRay.MouseButton1Click:Connect(function()
+    state.xrayActive = not state.xrayActive
+    if state.xrayActive then
+        toggleXRay.Text = "👁 X-RAY: ON"
+        toggleXRay.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
+    else
+        toggleXRay.Text = "👁 X-RAY: OFF"
+        toggleXRay.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    end
+    -- Limpa X-Ray se desligar
+    if not state.xrayActive then
+        for _, model in ipairs(Players:GetPlayers()) do
+            local char = model.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and part.Color == CONFIG.XRAY_COLOR then
+                        part.Color = part:GetAttribute("OriginalColor") or Color3.new(1,1,1)
+                        part.Transparency = part:GetAttribute("OriginalTransparency") or 0
+                        part:SetAttribute("XRayApplied", false)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- X-RAY ENGINE
+-- ==========================================
+local function updateXRay()
+    if not state.xrayActive then return end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and not part:GetAttribute("XRayApplied") then
+                        -- Salva cor original
+                        if not part:GetAttribute("OriginalColor") then
+                            part:SetAttribute("OriginalColor", part.Color)
+                            part:SetAttribute("OriginalTransparency", part.Transparency)
+                        end
+                        part.Color = CONFIG.XRAY_COLOR
+                        part.Transparency = CONFIG.XRAY_TRANSPARENCY
+                        part:SetAttribute("XRayApplied", true)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==========================================
+-- FUNÇÃO: OBTER ALVO VÁLIDO
+-- ==========================================
+local function getValidTarget()
+    local target = nil
+    
+    if CONFIG.USE_CROSSHAIR_CENTER then
+        -- Raycast do Centro da Tela (Mira FPS)
+        local viewport = Camera.ViewportSize
+        local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
+        local ray = Camera:ViewportPointToRay(center.X, center.Y)
+        
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = {LocalPlayer.Character}
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        
+        local result = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+        if result then
+            local model = result.Instance:FindFirstAncestorOfClass("Model")
+            if model then
+                local targetPlayer = Players:GetPlayerFromCharacter(model)
+                if targetPlayer and targetPlayer ~= LocalPlayer then
+                    local humanoid = model:FindFirstChildOfClass("Humanoid")
+                    if humanoid and humanoid.Health > 0 then
+                        target = model
+                    end
+                end
+            end
+        end
+    else
+        -- Fallback: Mouse.Hit
+        local model = Mouse.Target:FindFirstAncestorOfClass("Model")
+        if model then
+            local targetPlayer = Players:GetPlayerFromCharacter(model)
+            if targetPlayer and targetPlayer ~= LocalPlayer then
+                local humanoid = model:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then
+                    target = model
+                end
+            end
+        end
+    end
+    
+    return target
+end
+
+-- ==========================================
+-- FUNÇÃO: DISPARAR
+-- ==========================================
+local function executeFire()
+    local tool = LocalPlayer:FindFirstChildOfClass("Tool")
+    
+    if tool then
+        -- Método 1: Try Activate (Padrão Roblox)
+        if tool:FindFirstChild("Fire") or tool.ClassName == "Tool" then
+            tool:Activate()
+        end
+        
+        -- Método 2: Force Activated Property (Para armas que usam a propriedade)
+        if tool:GetAttribute("Activated") ~= nil or tool.ClassName == "Tool" then
+            tool.Activated = true
+        end
+        
+        -- Método 3: Mouse Injection (Último recurso)
+        -- Isso garante que o evento Mouse1Down seja disparado no Client
+        UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, true)
+        task.wait(0.01)
+        UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, false)
+    else
+        -- Se não tem tool, injeta clique na tela (para armas que não são tools equipadas)
+        UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, true)
+        task.wait(0.01)
+        UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, false)
+    end
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL
+-- ==========================================
+RunService.Heartbeat:Connect(function()
+    -- X-Ray Update (Leve)
+    updateXRay()
+    
+    if not state.afActive then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return end
+    
+    local target = getValidTarget()
+    
+    if target then
+        local now = tick()
+        if now - state.lastFireTime >= CONFIG.FIRE_INTERVAL then
+            executeFire()
+            state.lastFireTime = now
+        end
+    end
+end)
+
+print("[AF PRO] Script carregado. Use a GUI no canto superior esquerdo.")
