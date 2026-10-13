@@ -1,0 +1,211 @@
+-- AutoFire Pro v5 - Input Injection & Crosshair Lock
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local CONFIG = {
+    ENABLED = true,
+    FIRE_RATE = 0.05, -- Intervalo entre tiros (segundos)
+    RANGE = 1000,     -- Alcance da raycast
+    ENEMY_ONLY = true,
+    CENTER_CROSSHAIR = true, -- Usa o centro da tela em vez da posição do mouse
+    DEBUG = false     -- Mude para true para ver o que está acontecendo
+}
+
+-- GUI SYSTEM
+local function createGUI()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "AutoFireGUI"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    sg.DisplayOrder = 10000
+    sg.Parent = playerGui
+    
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(0, 250, 0, 120)
+    f.Position = UDim2.new(1, -260, 0.5, -60)
+    f.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    f.BorderSizePixel = 0
+    f.Parent = sg
+    
+    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 10); c.Parent = f
+    
+    local t = Instance.new("TextLabel")
+    t.Size = UDim2.new(1, 0, 0, 30)
+    t.BackgroundTransparency = 1
+    t.Text = "⚡ AutoFire Pro"
+    t.TextColor3 = Color3.fromRGB(255, 255, 255)
+    t.TextSize = 16
+    t.Font = Enum.Font.GothamBold
+    t.Parent = f
+    
+    local s = Instance.new("TextLabel")
+    s.Size = UDim2.new(1, 0, 0, 20)
+    s.Position = UDim2.new(0, 0, 0, 30)
+    s.BackgroundTransparency = 1
+    s.Text = "Status: ATIVO"
+    s.TextColor3 = Color3.fromRGB(0, 255, 0)
+    s.TextSize = 14
+    s.Font = Enum.Font.Gotham
+    s.Parent = f
+    
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -10, 0, 30)
+    b.Position = UDim2.new(0.5, -55, 0, 55)
+    b.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    b.Text = "Desativar"
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.TextSize = 12
+    b.Font = Enum.Font.GothamSemibold
+    b.Parent = f
+    
+    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 5); bc.Parent = b
+    
+    b.MouseButton1Click:Connect(function()
+        CONFIG.ENABLED = not CONFIG.ENABLED
+        b.Text = CONFIG.ENABLED and "Desativar" or "Ativar"
+        s.Text = "Status: " .. (CONFIG.ENABLED and "ATIVO" or "INATIVO")
+        s.TextColor3 = CONFIG.ENABLED and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+    end)
+end
+
+-- LÓGICA DE ALVO
+local function getTarget()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    
+    local camera = workspace.CurrentCamera
+    local origin, direction
+    
+    if CONFIG.CENTER_CROSSHAIR then
+        local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+        local ray = camera:ViewportPointToRay(center)
+        origin = ray.Origin
+        direction = ray.Direction
+    else
+        local mousePos = Mouse.Position
+        local ray = camera:ViewportPointToRay(Vector2.new(mousePos.X, mousePos.Y))
+        origin = ray.Origin
+        direction = ray.Direction
+    end
+    
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char}
+    params.RespectCanCollide = true
+    
+    local result = workspace:Raycast(origin, direction * CONFIG.RANGE, params)
+    
+    if result then
+        local model = result.Instance:FindFirstAncestorOfClass("Model")
+        if model and model:FindFirstChild("Humanoid") then
+            if model ~= char then
+                if CONFIG.ENEMY_ONLY then
+                    if model.Team and LocalPlayer.Team and model.Team == LocalPlayer.Team then
+                        return nil
+                    end
+                end
+                return model
+            end
+        end
+    end
+    return nil
+end
+
+-- NÚCLEO DE DISPARO: INPUT INJECTION
+local function executeFire(tool)
+    if not tool then return false end
+    
+    -- 1. Tenta RemoteEvents comuns (Fallback)
+    local remoteNames = {"Fire", "Shoot", "Trigger", "FireWeapon", "Ammo_Shot"}
+    for _, name in ipairs(remoteNames) do
+        local rem = tool:FindFirstChild(name)
+        if rem and rem:IsA("RemoteEvent") then
+            rem:FireServer()
+            return true
+        end
+    end
+    
+    -- 2. INPUT INJECTION (A MÚLTIPLICADORA DE FORÇA)
+    -- Isso força o UserInputService a acreditar que o mouse foi pressionado
+    local camera = workspace.CurrentCamera
+    local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    
+    -- Simula o "Press"
+    UserInputService:FireInput(Enum.UserInputType.MouseButton1, Enum.KeyCode.Unknown, true, false, nil, center)
+    
+    -- Pequeno delay para garantir que o evento seja processado
+    task.wait(0.01)
+    
+    -- Simula o "Release" (opcional, mas ajuda em armas com "auto" nativo)
+    UserInputService:FireInput(Enum.UserInputType.MouseButton1, Enum.KeyCode.Unknown, false, false, nil, center)
+    
+    return true
+end
+
+-- LOOP PRINCIPAL
+local lastFireTime = 0
+local function autoFireLoop()
+    while true do
+        RunService.Heartbeat:Wait()
+        
+        if not CONFIG.ENABLED then continue end
+        
+        local now = tick()
+        if now - lastFireTime < CONFIG.FIRE_RATE then continue end
+        
+        local char = LocalPlayer.Character
+        if not char then continue end
+        
+        local tool = char:FindFirstChildOfClass("Tool")
+        if not tool then continue end
+        
+        local target = getTarget()
+        
+        if target then
+            lastFireTime = now
+            executeFire(tool)
+            
+            if CONFIG.DEBUG then
+                print("[AutoFire] Disparou em: " .. target.Name)
+            end
+        end
+    end
+end
+
+-- INICIALIZAÇÃO
+local guiCreated = false
+local function tryCreateGUI()
+    if guiCreated then return end
+    pcall(function()
+        createGUI()
+        guiCreated = true
+    end)
+end
+
+task.spawn(function()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+    task.wait(2) -- Aguarda o jogo carregar
+    tryCreateGUI()
+    if CONFIG.DEBUG then print("[AutoFire] GUI criada ou fallback ativado.") end
+end)
+
+-- CHAT COMMANDS (Backup)
+LocalPlayer.Chat:Connect(function(msg)
+    local lower = msg:lower()
+    if lower:sub(1, 8) == "autofire" then
+        local args = lower:sub(9):split(" ")
+        if args[1] == "on" then CONFIG.ENABLED = true
+        elseif args[1] == "off" then CONFIG.ENABLED = false
+        elseif args[1] == "rate" and args[2] then CONFIG.FIRE_RATE = tonumber(args[2]) or 0.05
+        elseif args[1] == "debug" then CONFIG.DEBUG = not CONFIG.DEBUG
+        else print("[AutoFire] Uso: autofire [on|off|rate <n>|debug]") end
+        print("[AutoFire] Status: " .. tostring(CONFIG.ENABLED) .. " | Rate: " .. CONFIG.FIRE_RATE)
+    end
+end)
+
+task.spawn(autoFireLoop)
+print("[AutoFire Pro] Ativo. Digite 'autofire debug' no chat para ver o que está disparando.")
