@@ -1,0 +1,132 @@
+-- CONFIGURAÇÃO GERAL
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+local Tool = LocalPlayer:FindFirstChildOfClass("Tool")
+
+-- ESTADO
+local isFiring = false
+local isTriggered = false
+
+-- GUI CRIAÇÃO
+local function createGUI()
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "AutoFireGUI"
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local toggleBtn = Instance.new("TextButton")
+	toggleBtn.Name = "ToggleBtn"
+	toggleBtn.Size = UDim2.fromOffset(100, 30)
+	toggleBtn.Position = UDim2.new(0, 10, 0, 10) -- Canto superior esquerdo
+	toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	toggleBtn.Font = Enum.Font.GothamBold
+	toggleBtn.TextSize = 14
+	toggleBtn.Text = "AUTO FIRE: OFF"
+	toggleBtn.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = toggleBtn
+
+	local shadow = Instance.new("UIStroke")
+	shadow.Color = Color3.fromRGB(0, 0, 0)
+	shadow.Thickness = 1
+	shadow.Parent = toggleBtn
+
+	-- Lógica do Toggle
+	toggleBtn.MouseButton1Click:Connect(function()
+		isFiring = not isFiring
+		
+		-- Atualiza visual
+		if isFiring then
+			toggleBtn.Text = "AUTO FIRE: ON"
+			toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+		else
+			toggleBtn.Text = "AUTO FIRE: OFF"
+			toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+		end
+	end)
+end
+
+-- FUNÇÃO: VERIFICA SE O ALVO É UM INIMIGO VÁLIDO
+local function getValidTarget()
+	if not Mouse.Target then return nil end
+	
+	local target = Mouse.Target
+	local humanoid = target:FindFirstChildOfClass("Humanoid")
+	
+	-- Se não tem Humanoide, não é um personagem
+	if not humanoid then return nil end
+	
+	-- Verifica se é um Player (Modelo)
+	local model = target:FindFirstAncestorOfClass("Model")
+	if not model then return nil end
+	
+	local targetPlayer = Players:GetPlayerFromCharacter(model)
+	
+	-- Ignora o próprio jogador
+	if targetPlayer == LocalPlayer then return nil end
+	
+	-- Ignora se estiver morto
+	if humanoid.Health <= 0 then return nil end
+	
+	-- Opcional: Verificar se é NPC (Team) ou Inimigo
+	-- Se o jogo usa TeamColor, você pode adicionar:
+	-- if targetPlayer.Team ~= LocalPlayer.Team then return model end
+	
+	return model
+end
+
+-- FUNÇÃO: EXECUTA O DISPARO
+local function executeFire()
+	-- Prioridade 1: Tool Ativada (Melhor compatibilidade com armas personalizadas)
+	if Tool and Tool:FindFirstChild("Fire") then
+		Tool:Activate()
+	else
+		-- Prioridade 2: Simulação de Mouse (Útil para armas que usam Mouse1Down)
+		UserInputService:InjectGamepadState(Enum.KeyCode.One, true) -- Exemplo de fallback
+		-- Para simular o clique do mouse esquerdo especificamente:
+		UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, true)
+		-- Pequeno delay para simular o "hold" se necessário, mas para triggerbot instantâneo:
+		UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, false)
+	end
+end
+
+-- LOOP PRINCIPAL (HEARTBEAT)
+local lastFireTime = 0
+local FIRE_RATE = 0.05 -- 50ms entre disparos (20 Ticks por segundo). Ajuste conforme a arma.
+
+RunService.Heartbeat:Connect(function()
+	-- Verifica se o Auto Fire está ativo
+	if not isFiring then return end
+	
+	-- Verifica se o jogador está segurando o mouse (Opcional: Força o modo manual)
+	-- Se quiser que atire mesmo sem o mouse pressionado, remova esta linha:
+	-- if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then return end
+
+	local target = getValidTarget()
+	
+	if target then
+		-- Debounce: Garante a cadência de tiro
+		local currentTime = tick()
+		if currentTime - lastFireTime >= FIRE_RATE then
+			executeFire()
+			lastFireTime = currentTime
+			isTriggered = true
+		end
+	else
+		-- Se perdeu o alvo, mantém o estado de "pronto" para o próximo alvo
+		isTriggered = false
+	end
+end)
+
+-- INICIALIZAÇÃO
+createGUI()
+print("[AutoFire] Script carregado com sucesso.")
