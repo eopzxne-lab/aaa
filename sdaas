@@ -1,0 +1,228 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+
+-- ==========================================
+-- CONFIGURAÇÕES
+-- ==========================================
+local CONFIG = {
+    FIRE_INTERVAL = 0.06,      -- 60ms (Aprox. 16 tiros por segundo)
+    XRAY_COLOR = Color3.fromRGB(255, 0, 0), -- Vermelho
+    XRAY_TRANSPARENCY = 0.6,   -- 60% transparente
+    USE_CENTER_CROSSHAIR = true, -- Mira no centro da tela (FPS)
+}
+
+-- ==========================================
+-- ESTADO
+-- ==========================================
+local state = {
+    afActive = false,
+    xrayActive = false,
+    lastFireTime = 0,
+}
+
+-- ==========================================
+-- GUI CRIAÇÃO
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AF_XRay_GUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.fromOffset(140, 90)
+mainFrame.Position = UDim2.new(0, 10, 0, 10)
+mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+mainFrame.BackgroundTransparency = 0.1
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.fromScale(1, 0.25)
+title.BackgroundTransparency = 1
+title.Text = "⚡ AF + X-RAY"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 12
+title.Parent = mainFrame
+
+local btnAF = Instance.new("TextButton")
+btnAF.Size = UDim2.fromScale(1, 0.35)
+btnAF.Position = UDim2.new(0, 0, 0.28, 0)
+btnAF.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnAF.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnAF.Font = Enum.Font.GothamMedium
+btnAF.TextSize = 11
+btnAF.Text = "🔫 AF: OFF"
+btnAF.Parent = mainFrame
+
+local btnXRay = Instance.new("TextButton")
+btnXRay.Size = UDim2.fromScale(1, 0.35)
+btnXRay.Position = UDim2.new(0, 0, 0.66, 0)
+btnXRay.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+btnXRay.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnXRay.Font = Enum.Font.GothamMedium
+btnXRay.TextSize = 11
+btnXRay.Text = "👁 X-RAY: OFF"
+btnXRay.Parent = mainFrame
+
+for _, btn in {btnAF, btnXRay} do
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, 4)
+    c.Parent = btn
+end
+
+-- ==========================================
+-- X-RAY ENGINE
+-- ==========================================
+local function clearXRay()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and part:GetAttribute("XRayApplied") then
+                        part.Color = part:GetAttribute("OriginalColor") or Color3.new(1,1,1)
+                        part.Transparency = part:GetAttribute("OriginalTransparency") or 0
+                        part:SetAttribute("XRayApplied", false)
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function updateXRay()
+    if not state.xrayActive then return end
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char then
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") and not part:GetAttribute("XRayApplied") then
+                        if not part:GetAttribute("OriginalColor") then
+                            part:SetAttribute("OriginalColor", part.Color)
+                            part:SetAttribute("OriginalTransparency", part.Transparency)
+                        end
+                        part.Color = CONFIG.XRAY_COLOR
+                        part.Transparency = CONFIG.XRAY_TRANSPARENCY
+                        part:SetAttribute("XRayApplied", true)
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==========================================
+-- LÓGICA DE GUI
+-- ==========================================
+btnAF.MouseButton1Click:Connect(function()
+    state.afActive = not state.afActive
+    btnAF.Text = state.afActive and "🔫 AF: ON" or "🔫 AF: OFF"
+    btnAF.BackgroundColor3 = state.afActive and Color3.fromRGB(0, 140, 0) or Color3.fromRGB(50, 50, 50)
+    print(state.afActive and "[AF] Triggerbot ATIVADO" or "[AF] Triggerbot DESATIVADO")
+end)
+
+btnXRay.MouseButton1Click:Connect(function()
+    state.xrayActive = not state.xrayActive
+    btnXRay.Text = state.xrayActive and "👁 X-RAY: ON" or "👁 X-RAY: OFF"
+    btnXRay.BackgroundColor3 = state.xrayActive and Color3.fromRGB(0, 80, 160) or Color3.fromRGB(50, 50, 50)
+    
+    if not state.xrayActive then
+        clearXRay()
+    end
+end)
+
+-- ==========================================
+-- DETECÇÃO DE ALVO (CENTRO DA TELA)
+-- ==========================================
+local function getValidTarget()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+
+    if not CONFIG.USE_CENTER_CROSSHAIR then
+        local target = Mouse.Target
+        if target then
+            local model = target:FindFirstAncestorOfClass("Model")
+            if model and Players:GetPlayerFromCharacter(model) ~= LocalPlayer then
+                local humanoid = model:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then return model end
+            end
+        end
+        return nil
+    end
+
+    local viewport = Camera.ViewportSize
+    local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
+    local ray = Camera:ViewportPointToRay(center.X, center.Y)
+    
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    
+    local result = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+    
+    if result then
+        local model = result.Instance:FindFirstAncestorOfClass("Model")
+        if model then
+            local targetPlayer = Players:GetPlayerFromCharacter(model)
+            if targetPlayer and targetPlayer ~= LocalPlayer then
+                local humanoid = model:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then return model end
+            end
+        end
+    end
+    return nil
+end
+
+-- ==========================================
+-- SISTEMA DE DISPARO CORRIGIDO
+-- ==========================================
+local function executeFire()
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    -- A ferramenta equipada fica dentro do Character, não no Player
+    local tool = char:FindFirstChildOfClass("Tool")
+    
+    if tool then
+        -- Ativa a ferramenta nativamente pelo motor do Roblox
+        tool:Activate()
+    end
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL
+-- ==========================================
+RunService.Heartbeat:Connect(function()
+    updateXRay()
+    
+    if not state.afActive then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return end
+    
+    local target = getValidTarget()
+    
+    if target then
+        local now = tick()
+        if now - state.lastFireTime >= CONFIG.FIRE_INTERVAL then
+            executeFire()
+            state.lastFireTime = now
+        end
+    end
+end)
+
+print("[AF+XRay] Sistema carregado e corrigido.")
