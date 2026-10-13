@@ -1,0 +1,197 @@
+-- AutoFire Pro v2 - Com GUI e Detecção Híbrida
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+-- CONFIG
+local CONFIG = {
+    ENABLED = true,
+    FIRE_RATE = 0.05, -- Segundos entre tiros
+    RANGE = 800,      -- Alcance
+    ENEMY_ONLY = true,
+    CENTER_CROSSHAIR = true, -- Usa o centro da tela em vez da posição exata do mouse
+    IGNORE_ALLIES = true
+}
+
+-- GUI SYSTEM
+local function createGUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AutoFireGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.Size = UDim2.new(0, 200, 0, 80)
+    frame.Position = UDim2.new(1, -210, 0.5, -40)
+    frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    frame.BorderSizePixel = 0
+    frame.Parent = screenGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = frame
+    
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "⚡ AutoFire Pro"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextSize = 16
+    title.Font = Enum.Font.GothamBold
+    title.Parent = frame
+    
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "StatusLabel"
+    statusLabel.Size = UDim2.new(1, 0, 0, 20)
+    statusLabel.Position = UDim2.new(0, 0, 0, 30)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: ATIVO"
+    statusLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+    statusLabel.TextSize = 14
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.Parent = frame
+    
+    local btnToggle = Instance.new("TextButton")
+    btnToggle.Name = "ToggleBtn"
+    btnToggle.Size = UDim2.new(1, -10, 0, 25)
+    btnToggle.Position = UDim2.new(0.5, -55, 0, 50)
+    btnToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    btnToggle.Text = "Desativar"
+    btnToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btnToggle.TextSize = 12
+    btnToggle.Font = Enum.Font.GothamSemibold
+    btnToggle.Parent = frame
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 5)
+    btnCorner.Parent = btnToggle
+    
+    btnToggle.MouseButton1Click:Connect(function()
+        CONFIG.ENABLED = not CONFIG.ENABLED
+        btnToggle.Text = CONFIG.ENABLED and "Desativar" or "Ativar"
+        statusLabel.Text = "Status: " .. (CONFIG.ENABLED and "ATIVO" or "INATIVO")
+        statusLabel.TextColor3 = CONFIG.ENABLED and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+        print("[AutoFire] Status alterado para: " .. tostring(CONFIG.ENABLED))
+    end)
+    
+    return screenGui
+end
+
+-- LÓGICA DE DISPARO HÍBRIDA
+local function forceFire(tool)
+    if not tool then return false end
+    
+    -- 1. Tenta RemoteEvents comuns
+    local remoteNames = {"Fire", "Shoot", "Trigger", "FireWeapon", "Ammo_Shot"}
+    for _, name in ipairs(remoteNames) do
+        local rem = tool:FindFirstChild(name)
+        if rem and rem:IsA("RemoteEvent") then
+            rem:FireServer()
+            return true
+        end
+    end
+    
+    -- 2. Tenta BindableEvents locais
+    local bindableNames = {"Fire", "Shoot", "Trigger"}
+    for _, name in ipairs(bindableNames) do
+        local bind = tool:FindFirstChild(name)
+        if bind and bind:IsA("BindableEvent") then
+            bind:Fire()
+            return true
+        end
+    end
+    
+    -- 3. Fallback: Simula Input via UserInputService (Mais robusto que Mouse:Click)
+    -- Isso força o script da arma a "ver" que o mouse foi pressionado
+    local mousePos = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
+    
+    -- Simula o evento de mouse
+    UserInputService:FireInput(Enum.UserInputType.MouseButton1, Enum.KeyCode.Unknown, true, false, nil, mousePos)
+    
+    -- Pequeno delay para garantir que o evento seja processado
+    task.wait(0.01)
+    
+    return true
+end
+
+-- LÓGICA DE ALVO
+local function getTarget()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    
+    local camera = workspace.CurrentCamera
+    
+    -- Define a origem do raycast
+    local origin, direction
+    if CONFIG.CENTER_CROSSHAIR then
+        -- Usa o centro exato da tela
+        local center = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+        local ray = camera:ViewportPointToRay(center)
+        origin = ray.Origin
+        direction = ray.Direction
+    else
+        -- Usa a posição do mouse
+        local mousePos = Mouse.Position
+        local ray = camera:ViewportPointToRay(Vector2.new(mousePos.X, mousePos.Y))
+        origin = ray.Origin
+        direction = ray.Direction
+    end
+    
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char}
+    params.RespectCanCollide = true
+    
+    local result = workspace:Raycast(origin, direction * CONFIG.RANGE, params)
+    
+    if result then
+        local model = result.Instance:FindFirstAncestorOfClass("Model")
+        if model and model:FindFirstChild("Humanoid") then
+            if model ~= char then
+                if CONFIG.ENEMY_ONLY then
+                    if model.Team and LocalPlayer.Team and model.Team == LocalPlayer.Team then
+                        return nil
+                    end
+                end
+                return model
+            end
+        end
+    end
+    return nil
+end
+
+-- LOOP PRINCIPAL
+local lastFireTime = 0
+local function autoFireLoop()
+    while true do
+        RunService.Heartbeat:Wait()
+        
+        if not CONFIG.ENABLED then continue end
+        
+        local now = tick()
+        if now - lastFireTime < CONFIG.FIRE_RATE then continue end
+        
+        local char = LocalPlayer.Character
+        if not char then continue end
+        
+        local tool = char:FindFirstChildOfClass("Tool")
+        if not tool then continue end
+        
+        local target = getTarget()
+        
+        if target then
+            lastFireTime = now
+            forceFire(tool)
+        end
+    end
+end
+
+-- INICIALIZAÇÃO
+local gui = createGUI()
+task.spawn(autoFireLoop)
+print("[AutoFire] Sistema iniciado. Use a GUI no canto direito para ativar/desativar.")
