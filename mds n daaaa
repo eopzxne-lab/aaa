@@ -1,0 +1,200 @@
+-- ==========================================
+-- SCRIPT: AUTO FIRE (PROFISSIONAL & BLINDADO) + GUI OCULTÁVEL (TECLA K)
+-- ==========================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+
+local CONFIG = {
+    FIRE_DELAY = 0.08,        -- Velocidade da rajada (cadência)
+    MAX_DISTANCE = 300,
+    TOGGLE_KEY = Enum.KeyCode.K, -- Tecla para mostrar/esconder a GUI (Letra K)
+}
+
+local state = {
+    afActive = false,
+    lastFireTime = 0,
+    isFiring = false,
+    guiVisible = true,
+}
+
+-- ==========================================
+-- INTERFACE COMPACTA (GUI)
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ModernAutoFireGUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.fromOffset(140, 75)
+mainFrame.Position = UDim2.new(0, 15, 0, 15)
+mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+mainFrame.BackgroundTransparency = 0.05
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = mainFrame
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(45, 45, 55)
+stroke.Thickness = 1.5
+stroke.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 25)
+title.BackgroundTransparency = 1
+title.Text = "⚡ AUTO FIRE"
+title.TextColor3 = Color3.fromRGB(240, 240, 250)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 12
+title.Parent = mainFrame
+
+local btnAF = Instance.new("TextButton")
+btnAF.Size = UDim2.new(1, -20, 0, 32)
+btnAF.Position = UDim2.new(0, 10, 0, 32)
+btnAF.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+btnAF.TextColor3 = Color3.fromRGB(200, 200, 210)
+btnAF.Font = Enum.Font.GothamSemibold
+btnAF.TextSize = 11
+btnAF.Text = "🔫 AF: OFF"
+btnAF.Parent = mainFrame
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 6)
+btnCorner.Parent = btnAF
+
+-- ==========================================
+-- SISTEMA DE OCULTAR GUI POR TECLA
+-- ==========================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == CONFIG.TOGGLE_KEY then
+        state.guiVisible = not state.guiVisible
+        mainFrame.Visible = state.guiVisible
+    end
+end)
+
+-- ==========================================
+-- BOTÃO DE EVENTOS (AUTO FIRE)
+-- ==========================================
+btnAF.MouseButton1Click:Connect(function()
+    state.afActive = not state.afActive
+    if state.afActive then
+        btnAF.Text = "🔫 AF: ON"
+        btnAF.BackgroundColor3 = Color3.fromRGB(34, 197, 94)
+        btnAF.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        btnAF.Text = "🔫 AF: OFF"
+        btnAF.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+        btnAF.TextColor3 = Color3.fromRGB(200, 200, 210)
+        
+        -- CORREÇÃO CRÍTICA: Assegura liberação correta do gatilho ao desligar
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function()
+                VirtualUser:Button1Up(UserInputService:GetMouseLocation())
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- DETECÇÃO DE ALVO VIA MOUSE.TARGET
+-- ==========================================
+local function getValidTarget()
+    local targetPart = Mouse.Target
+    if not targetPart then return nil end
+    
+    local model = targetPart:FindFirstAncestorOfClass("Model")
+    if not model then return nil end
+    
+    local targetPlayer = Players:GetPlayerFromCharacter(model)
+    if targetPlayer and targetPlayer ~= LocalPlayer then
+        local humanoid = model:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") and model:FindFirstChild("HumanoidRootPart") then
+                local dist = (char.HumanoidRootPart.Position - model.HumanoidRootPart.Position).Magnitude
+                if dist <= CONFIG.MAX_DISTANCE then
+                    return model
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL DE CONTROLE (HEARTBEAT - RAJADA)
+-- ==========================================
+RunService.Heartbeat:Connect(function()
+    if not state.afActive then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then 
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function() VirtualUser:Button1Up(UserInputService:GetMouseLocation()) end)
+        end
+        return 
+    end
+    
+    local tool = char:FindFirstChildOfClass("Tool")
+    if not tool then
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function() VirtualUser:GetMouseLocation() and VirtualUser:Button1Up(UserInputService:GetMouseLocation()) end)
+        end
+        return
+    end
+    
+    local target = getValidTarget()
+    local now = tick()
+    local mouseLocation = UserInputService:GetMouseLocation()
+    
+    if target then
+        -- CORREÇÃO CRÍTICA: Sincronização robusta de cadência (Fire Rate) baseada em clock seguro
+        if not state.isFiring then
+            state.isFiring = true
+            state.lastFireTime = now
+            pcall(function()
+                VirtualUser:Button1Down(mouseLocation)
+            end)
+        else
+            if (now - state.lastFireTime >= CONFIG.FIRE_DELAY) then
+                state.lastFireTime = now
+                pcall(function()
+                    -- Pulso limpo de clique para armas automáticas/semi-automáticas
+                    VirtualUser:Button1Up(mouseLocation)
+                    task.defer(function()
+                        if state.afActive and state.isFiring then
+                            VirtualUser:Button1Down(mouseLocation)
+                        end
+                    end)
+                end)
+            end
+        end
+    else
+        -- CORREÇÃO CRÍTICA: Reseta o gatilho imediatamente ao perder o alvo de vista (evita tiros perdidos no vazio)
+        if state.isFiring then
+            state.isFiring = false
+            pcall(function()
+                VirtualUser:Button1Up(mouseLocation)
+            end)
+        end
+    end
+end)
+
+print("[Auto Fire] Carregado com Sucesso! Pressione a tecla K para esconder/mostrar a GUI.")
