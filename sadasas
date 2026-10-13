@@ -1,0 +1,147 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local Camera = workspace.CurrentCamera
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+
+-- ==========================================
+-- CONFIGURAÇÕES AJUSTÁVEIS
+-- ==========================================
+local FIRE_INTERVAL = 0.06 -- 60ms (aprox. 16 tps). Aumente para armas lentas.
+local USE_TOOL_ACTIVATE = true -- Tenta Tool:Activate() primeiro. Se falhar, usa Mouse Injection.
+local CENTER_CROSSHAIR = true  -- Usa o centro da tela em vez de onde o mouse está (mais preciso para FPS).
+
+-- ==========================================
+-- GUI
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AF_GUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local btn = Instance.new("TextButton")
+btn.Name = "AF_Toggle"
+btn.Size = UDim2.fromOffset(120, 32)
+btn.Position = UDim2.new(0, 10, 0, 10)
+btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+btn.Font = Enum.Font.GothamMedium
+btn.TextSize = 13
+btn.Text = "🔫 AF: OFF"
+btn.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 5)
+corner.Parent = btn
+
+local isActive = false
+
+btn.MouseButton1Click:Connect(function()
+    isActive = not isActive
+    if isActive then
+        btn.Text = "🔫 AF: ON"
+        btn.BackgroundColor3 = Color3.fromRGB(0, 120, 60)
+    else
+        btn.Text = "🔫 AF: OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    end
+end)
+
+-- ==========================================
+-- LÓGICA DE ALVO
+-- ==========================================
+local function getTarget()
+    -- 1. Obter o ponto de mira (Centro da tela ou Mouse)
+    local ray
+    if CENTER_CROSSHAIR then
+        local viewportSize = Camera.ViewportSize
+        local centerPoint = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+        local cameraRay = Camera:ViewportPointToRay(centerPoint.X, centerPoint.Y)
+        ray = cameraRay
+    else
+        ray = Camera:WorldToViewportPoint(Mouse.Hit.Position) -- Fallback
+    end
+
+    -- 2. Raycast para pegar o primeiro objeto sólido
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {LocalPlayer.Character}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    
+    local result = workspace:Raycast(ray.Origin, ray.Direction * 500, params)
+    
+    if not result then return nil end
+
+    local hitPart = result.Instance
+    local model = hitPart:FindFirstAncestorOfClass("Model")
+    
+    if not model then return nil end
+
+    -- 3. Verificar se é um Player Válido
+    local targetPlayer = Players:GetPlayerFromCharacter(model)
+    
+    -- Se for NPC, você pode remover a checagem abaixo ou checar se é Team
+    if targetPlayer and targetPlayer ~= LocalPlayer then
+        local humanoid = model:FindFirstChildOfClass("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            return model
+        end
+    end
+    
+    return nil
+end
+
+-- ==========================================
+-- LÓGICA DE DISPARO
+-- ==========================================
+local function fireWeapon()
+    local tool = LocalPlayer:FindFirstChildOfClass("Tool")
+    
+    -- Estratégia A: Tool:Activate() (Melhor para armas nativas)
+    if USE_TOOL_ACTIVATE and tool then
+        -- Verifica se a tool tem a propriedade Activated (algumas armas usam isso)
+        if tool.Activated ~= nil then
+            tool.Activated = true
+        else
+            tool:Activate()
+        end
+        return
+    end
+
+    -- Estratégia B: Injeção de Mouse (Fallback para armas que escutam Mouse1Down)
+    -- Isso simula o clique físico.
+    UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, true)
+    -- Pequeno delay para garantir que o evento "Down" foi processado antes do "Up"
+    task.wait(0.01)
+    UserInputService:InjectMouseButton(Enum.UserInputType.MouseButton1, false)
+end
+
+-- ==========================================
+-- LOOP PRINCIPAL
+-- ==========================================
+local lastFire = 0
+
+RunService.Heartbeat:Connect(function()
+    if not isActive then return end
+    
+    -- Verifica se o jogador está vivo e com ferramenta (opcional)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return end
+
+    local target = getTarget()
+    
+    if target then
+        local now = tick()
+        if now - lastFire >= FIRE_INTERVAL then
+            fireWeapon()
+            lastFire = now
+        end
+    end
+end)
+
+print("[AF] Triggerbot carregado. Ative via GUI.")
