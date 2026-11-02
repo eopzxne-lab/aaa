@@ -1,0 +1,242 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ============================================================
+-- CONFIGURAÇÕES
+-- ============================================================
+local CONFIG = {
+    MAX_RANGE = 500,        -- Distância máxima (aumentei para garantir)
+    TEAM_CHECK = true,      
+    FRIENDLY_FIRE = false,  
+    SHOW_HUD = true,        
+    SHOW_DEBUG = true,      -- Mostra o que o script está vendo em tempo real
+    HUD_POSITION = UDim2.new(0, 10, 0, 10), 
+    HUD_COLOR = Color3.fromRGB(20, 20, 20),
+    ACCENT_COLOR = Color3.fromRGB(0, 255, 127),
+    DEBUG_COLOR = Color3.fromRGB(255, 255, 0)
+}
+
+local state = {
+    enabled = false,
+    isMouseDown = false,
+    lastDebugText = "Idle"
+}
+
+-- ============================================================
+-- INTERFACE (GUI)
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DeepHat_Triggerbot_GUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = PlayerGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 100)
+mainFrame.Position = CONFIG.HUD_POSITION
+mainFrame.BackgroundColor3 = CONFIG.HUD_COLOR
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Visible = CONFIG.SHOW_HUD
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, 0, 0, 25)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "DeepHat Triggerbot"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = mainFrame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "Status"
+statusLabel.Size = UDim2.new(1, -10, 0, 20)
+statusLabel.Position = UDim2.new(0, 5, 0, 30)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: OFF"
+statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = mainFrame
+
+local debugLabel = Instance.new("TextLabel")
+debugLabel.Name = "Debug"
+debugLabel.Size = UDim2.new(1, -10, 0, 20)
+debugLabel.Position = UDim2.new(0, 5, 0, 50)
+debugLabel.BackgroundTransparency = 1
+debugLabel.Text = "Debug: Waiting..."
+debugLabel.TextColor3 = CONFIG.DEBUG_COLOR
+debugLabel.Font = Enum.Font.Code
+debugLabel.TextSize = 11
+debugLabel.TextXAlignment = Enum.TextXAlignment.Left
+debugLabel.Visible = CONFIG.SHOW_DEBUG
+debugLabel.Parent = mainFrame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "Toggle"
+toggleBtn.Size = UDim2.new(0, 80, 0, 25)
+toggleBtn.Position = UDim2.new(1, -90, 0, 70)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+toggleBtn.Text = "Enable"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.GothamMedium
+toggleBtn.TextSize = 14
+toggleBtn.Parent = mainFrame
+
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 6)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    state.enabled = not state.enabled
+    
+    if state.enabled then
+        toggleBtn.Text = "Disable"
+        toggleBtn.BackgroundColor3 = CONFIG.ACCENT_COLOR
+        statusLabel.Text = "Status: ON"
+        statusLabel.TextColor3 = CONFIG.ACCENT_COLOR
+    else
+        toggleBtn.Text = "Enable"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        statusLabel.Text = "Status: OFF"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        if state.isMouseDown then
+            UserInputService:SendMouseInput(Enum.UserInputState.End, Vector2.new(0,0), false)
+            state.isMouseDown = false
+        end
+        debugLabel.Text = "Debug: Disabled"
+    end
+end)
+
+-- ============================================================
+-- LÓGICA DE DETECÇÃO
+-- ============================================================
+
+local function getCharacterFromPart(part)
+    -- Sobe na hierarquia para achar o Model que contém o Humanoid
+    local current = part
+    while current do
+        if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+            return current
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+local function isEnemy(character)
+    if not character or not character.Parent then return false end
+    
+    local targetPlayer = Players:FindFirstChild(character.Name)
+    
+    if not targetPlayer then
+        return not CONFIG.FRIENDLY_FIRE
+    end
+
+    if CONFIG.FRIENDLY_FIRE then return true end
+
+    if CONFIG.TEAM_CHECK and targetPlayer.Team and LocalPlayer.Team then
+        if targetPlayer.Team.Name == LocalPlayer.Team.Name then
+            return false
+        end
+    end
+    
+    return true
+end
+
+local function updateDebug(text)
+    if CONFIG.SHOW_DEBUG and debugLabel then
+        if debugLabel.Text ~= text then
+            debugLabel.Text = "Debug: " .. text
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not state.enabled then return end
+    
+    local character = LocalPlayer.Character
+    local camera = workspace.CurrentCamera
+    
+    if not character or not camera then
+        if state.isMouseDown then
+            UserInputService:SendMouseInput(Enum.UserInputState.End, Vector2.new(0,0), false)
+            state.isMouseDown = false
+        end
+        updateDebug("No Character/Camera")
+        return
+    end
+
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        if state.isMouseDown then
+            UserInputService:SendMouseInput(Enum.UserInputState.End, Vector2.new(0,0), false)
+            state.isMouseDown = false
+        end
+        updateDebug("Dead/No Humanoid")
+        return
+    end
+
+    -- 1. Posição do Mouse
+    local mousePos = UserInputService:GetMouseLocation()
+    local worldPoint = camera:ViewportPointToWorldSpace(mousePos)
+    local rayDirection = camera.CFrame.LookVector * CONFIG.MAX_RANGE
+    
+    -- 2. Raycast Params
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {character} -- Ignora o próprio jogador
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.IgnoreWater = true
+
+    local raycastResult = workspace:Raycast(worldPoint, rayDirection, params)
+    
+    local shouldFire = false
+    
+    if raycastResult and raycastResult.Instance then
+        local hitPart = raycastResult.Instance
+        local hitCharacter = getCharacterFromPart(hitPart)
+        
+        if hitCharacter then
+            if isEnemy(hitCharacter) then
+                shouldFire = true
+                updateDebug("Target: " .. hitCharacter.Name)
+            else
+                updateDebug("Ally: " .. hitCharacter.Name)
+            end
+        else
+            -- Atingiu algo que não é personagem (parede, chão, etc)
+            updateDebug("Blocked: " .. hitPart.Name)
+        end
+    else
+        updateDebug("Empty Space")
+    end
+
+    -- 3. Execução do Disparo
+    if shouldFire then
+        if not state.isMouseDown then
+            UserInputService:SendMouseInput(Enum.UserInputState.Begin, Vector2.new(0,0), false)
+            state.isMouseDown = true
+        end
+    else
+        if state.isMouseDown then
+            UserInputService:SendMouseInput(Enum.UserInputState.End, Vector2.new(0,0), false)
+            state.isMouseDown = false
+        end
+    end
+end)
+
+game:BindToClose(function()
+    screenGui:Destroy()
+end)
+
+print("[DeepHat] Triggerbot v2 carregado. Verifique a etiqueta amarela de DEBUG para saber o que ele está vendo.")
