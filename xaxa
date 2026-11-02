@@ -1,0 +1,282 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+
+-- Proteção para o PlayerGui (funciona em executores que suportam CoreGui ou PlayerGui)
+local success, targetParent = pcall(function()
+    return CoreGui
+end)
+if not success or not targetParent then
+    targetParent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- ============================================================
+-- CONFIGURAÇÕES
+-- ============================================================
+local CONFIG = {
+    MAX_RANGE = 1000,          -- Distância máxima do raycast
+    TEAM_CHECK = true,        
+    FRIENDLY_FIRE = false,    
+    SHOW_HUD = true,          
+    SHOW_DEBUG = true,        
+    HUD_POSITION = UDim2.new(0, 10, 0, 10),  
+    HUD_COLOR = Color3.fromRGB(20, 20, 20),
+    ACCENT_COLOR = Color3.fromRGB(0, 255, 127),
+    DEBUG_COLOR = Color3.fromRGB(255, 255, 0)
+}
+
+local state = {
+    enabled = false,
+    isFiring = false,
+    lastShotTick = 0
+}
+
+-- ============================================================
+-- INTERFACE (GUI)
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "DeepHat_Triggerbot_GUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = targetParent
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 100)
+mainFrame.Position = CONFIG.HUD_POSITION
+mainFrame.BackgroundColor3 = CONFIG.HUD_COLOR
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Visible = CONFIG.SHOW_HUD
+mainFrame.Parent = screenGui
+
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
+
+local title = Instance.new("TextLabel")
+title.Name = "Title"
+title.Size = UDim2.new(1, 0, 0, 25)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "DeepHat Triggerbot"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = mainFrame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "Status"
+statusLabel.Size = UDim2.new(1, -10, 0, 20)
+statusLabel.Position = UDim2.new(0, 5, 0, 30)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: OFF"
+statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = mainFrame
+
+local debugLabel = Instance.new("TextLabel")
+debugLabel.Name = "Debug"
+debugLabel.Size = UDim2.new(1, -10, 0, 20)
+debugLabel.Position = UDim2.new(0, 5, 0, 50)
+debugLabel.BackgroundTransparency = 1
+debugLabel.Text = "Debug: Waiting..."
+debugLabel.TextColor3 = CONFIG.DEBUG_COLOR
+debugLabel.Font = Enum.Font.Code
+debugLabel.TextSize = 11
+debugLabel.TextXAlignment = Enum.TextXAlignment.Left
+debugLabel.Visible = CONFIG.SHOW_DEBUG
+debugLabel.Parent = mainFrame
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "Toggle"
+toggleBtn.Size = UDim2.new(0, 80, 0, 25)
+toggleBtn.Position = UDim2.new(1, -90, 0, 70)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+toggleBtn.Text = "Enable"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.GothamMedium
+toggleBtn.TextSize = 14
+toggleBtn.Parent = mainFrame
+
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- Funções de clique corrigidas para segurar em metralhadoras
+local function startFiring()
+    if not state.isFiring then
+        state.isFiring = true
+        pcall(function()
+            if mouse1press then
+                mouse1press()
+            elseif pressmouse1 then
+                pressmouse1()
+            end
+        end)
+    end
+end
+
+local function stopFiring()
+    if state.isFiring then
+        state.isFiring = false
+        pcall(function()
+            if mouse1release then
+                mouse1release()
+            elseif releasemouse1 then
+                releasemouse1()
+            end
+        end)
+    end
+end
+
+-- Função auxiliar para armas de um tiro (clique rápido contínuo)
+local function clickOnce()
+    pcall(function()
+        if mouse1click then
+            mouse1click()
+        elseif clickmouse1 then
+            clickmouse1()
+        else
+            -- Fallback caso o executor só tenha press/release
+            startFiring()
+            task.delay(0.05, stopFiring)
+        end
+    end)
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    state.enabled = not state.enabled
+    
+    if state.enabled then
+        toggleBtn.Text = "Disable"
+        toggleBtn.BackgroundColor3 = CONFIG.ACCENT_COLOR
+        statusLabel.Text = "Status: ON"
+        statusLabel.TextColor3 = CONFIG.ACCENT_COLOR
+    else
+        toggleBtn.Text = "Enable"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        statusLabel.Text = "Status: OFF"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+        stopFiring()
+        debugLabel.Text = "Debug: Disabled"
+    end
+end)
+
+-- ============================================================
+-- LÓGICA DE DETECÇÃO CORRIGIDA
+-- ============================================================
+local function getCharacterFromPart(part)
+    local current = part
+    while current and current ~= workspace do
+        if current:IsA("Model") and current:FindFirstChildOfClass("Humanoid") then
+            return current
+        end
+        current = current.Parent
+    end
+    return nil
+end
+
+local function isEnemy(character)
+    if not character or not character.Parent then return false end
+    
+    local targetPlayer = Players:GetPlayerFromCharacter(character)
+    
+    if not targetPlayer then
+        return not CONFIG.FRIENDLY_FIRE
+    end
+
+    if targetPlayer == LocalPlayer then
+        return false
+    end
+
+    if CONFIG.FRIENDLY_FIRE then return true end
+
+    if CONFIG.TEAM_CHECK and targetPlayer.Team and LocalPlayer.Team then
+        if targetPlayer.Team == LocalPlayer.Team then
+            return false
+        end
+    end
+    
+    return true
+end
+
+local function updateDebug(text)
+    if CONFIG.SHOW_DEBUG and debugLabel then
+        if debugLabel.Text ~= text then
+            debugLabel.Text = "Debug: " .. text
+        end
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not state.enabled then 
+        stopFiring()
+        return 
+    end
+    
+    local character = LocalPlayer.Character
+    local camera = workspace.CurrentCamera
+    
+    if not character or not camera then
+        stopFiring()
+        updateDebug("No Character/Camera")
+        return
+    end
+
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        stopFiring()
+        updateDebug("Dead/No Humanoid")
+        return
+    end
+
+    -- Cria o Raycast partindo exatamente do centro da tela
+    local viewportSize = camera.ViewportSize
+    local centerScreen = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    local unitRay = camera:ViewportPointToRay(centerScreen.X, centerScreen.Y)
+    
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {character}
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.IgnoreWater = true
+
+    local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * CONFIG.MAX_RANGE, params)
+    
+    local shouldFire = false
+    
+    if raycastResult and raycastResult.Instance then
+        local hitPart = raycastResult.Instance
+        local hitCharacter = getCharacterFromPart(hitPart)
+        
+        if hitCharacter then
+            if isEnemy(hitCharacter) then
+                shouldFire = true
+                updateDebug("Target: " .. hitCharacter.Name)
+            else
+                updateDebug("Ally: " .. hitCharacter.Name)
+            end
+        else
+            updateDebug("Blocked: " + hitPart.Name)
+        end
+    else
+        updateDebug("Empty Space")
+    end
+
+    if shouldFire then
+        -- Verifica se a arma é automática olhando o tipo de input ou se está segurando
+        -- Detectamos metralhadoras mantendo o botão pressionado continuamente
+        startFiring()
+    else
+        stopFiring()
+    end
+end)
+
+game:BindToClose(function()
+    stopFiring()
+    screenGui:Destroy()
+end)
+
+print("[DeepHat] Triggerbot v3.1 (Auto/Semi) carregado com sucesso!")
